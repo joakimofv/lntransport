@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"net/netip"
+	"reflect"
 	"testing"
 	"time"
 
@@ -227,10 +228,14 @@ func TestListenErr(t *testing.T) {
 
 	privkey1, _ := btcec.NewPrivateKey()
 	errCh := make(chan ErrAndAddrPort, 1)
+	var errFuncErr ErrAndAddrPort
 	lt1, _ := New(Config{
 		Privkey:        privkeyFixedSize(privkey1.Serialize()),
 		ListenErrNoLog: true,
 		ListenErrChan:  errCh,
+		ListenErrFunc: func(ea ErrAndAddrPort) {
+			errFuncErr = ea
+		},
 	})
 	defer lt1.Close()
 	privkey2, _ := btcec.NewPrivateKey()
@@ -243,21 +248,27 @@ func TestListenErr(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if !reflect.ValueOf(errFuncErr).IsZero() {
+		t.Error(errFuncErr)
+	}
+
 	// Dial with the wrong pubkey
 	_, err = lt2.Dial(context.Background(), addr.String(), privkey2.PubKey().SerializeCompressed())
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
-	// Expecting AuthError from listener
+	// Expecting AuthError from listener.
+	// On channel.
+	var ea ErrAndAddrPort
 	select {
-	case err := <-errCh:
-		if err.AddrPort != addr {
-			t.Errorf("expected %v, got %v", addr, err.AddrPort)
+	case ea = <-errCh:
+		if ea.AddrPort != addr {
+			t.Errorf("expected %v, got %v", addr, ea.AddrPort)
 		}
 		var authErr AuthError
-		if !errors.As(err.Err, &authErr) {
-			t.Errorf("unexpected error type %T: %[1]v", err.Err)
+		if !errors.As(ea.Err, &authErr) {
+			t.Errorf("unexpected error type %T: %[1]v", ea.Err)
 		} else {
 			// Don't know the auto selected addrPort, just check non-zero.
 			if authErr.RemoteAddrPort == (netip.AddrPort{}) {
@@ -266,6 +277,10 @@ func TestListenErr(t *testing.T) {
 		}
 	case <-time.After(time.Millisecond):
 		t.Fatal("timed out waiting for listener error")
+	}
+	// On function.
+	if ea != errFuncErr {
+		t.Errorf("expected %v, got %v", ea, errFuncErr)
 	}
 }
 

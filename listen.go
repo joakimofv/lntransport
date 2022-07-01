@@ -109,6 +109,9 @@ func (lt *LnTransport) Listen(ctx context.Context, address string, options ...fu
 					case <-lt.closed:
 					}
 				}
+				if lt.cfg.ListenErrFunc != nil {
+					lt.cfg.ListenErrFunc(ErrAndAddrPort{Err: err, AddrPort: addrPort})
+				}
 				handshakeSema <- struct{}{}
 				continue
 			}
@@ -214,6 +217,9 @@ func (lt *LnTransport) doHandshake(
 			case <-lt.closed:
 			}
 		}
+		if lt.cfg.ListenErrFunc != nil {
+			lt.cfg.ListenErrFunc(ErrAndAddrPort{Err: err, AddrPort: addrPort})
+		}
 		return
 	}
 	// Attempt to carry out the first act of the handshake protocol. If the
@@ -231,6 +237,9 @@ func (lt *LnTransport) doHandshake(
 			case <-lt.closed:
 			}
 		}
+		if lt.cfg.ListenErrFunc != nil {
+			lt.cfg.ListenErrFunc(ErrAndAddrPort{Err: err, AddrPort: addrPort})
+		}
 		return
 	}
 	if err := c.noise.RecvActOne(actOne); err != nil {
@@ -243,6 +252,9 @@ func (lt *LnTransport) doHandshake(
 			case lt.cfg.ListenErrChan <- ErrAndAddrPort{Err: err, AddrPort: addrPort}:
 			case <-lt.closed:
 			}
+		}
+		if lt.cfg.ListenErrFunc != nil {
+			lt.cfg.ListenErrFunc(ErrAndAddrPort{Err: err, AddrPort: addrPort})
 		}
 		return
 	}
@@ -260,6 +272,9 @@ func (lt *LnTransport) doHandshake(
 			case <-lt.closed:
 			}
 		}
+		if lt.cfg.ListenErrFunc != nil {
+			lt.cfg.ListenErrFunc(ErrAndAddrPort{Err: err, AddrPort: addrPort})
+		}
 		return
 	}
 	if _, err := c.conn.Write(actTwo[:]); err != nil {
@@ -272,6 +287,9 @@ func (lt *LnTransport) doHandshake(
 			case lt.cfg.ListenErrChan <- ErrAndAddrPort{Err: err, AddrPort: addrPort}:
 			case <-lt.closed:
 			}
+		}
+		if lt.cfg.ListenErrFunc != nil {
+			lt.cfg.ListenErrFunc(ErrAndAddrPort{Err: err, AddrPort: addrPort})
 		}
 		return
 	}
@@ -294,6 +312,9 @@ func (lt *LnTransport) doHandshake(
 			case <-lt.closed:
 			}
 		}
+		if lt.cfg.ListenErrFunc != nil {
+			lt.cfg.ListenErrFunc(ErrAndAddrPort{Err: err, AddrPort: addrPort})
+		}
 		return
 	}
 	// Finally, finish the handshake processes by reading and decrypting
@@ -311,6 +332,9 @@ func (lt *LnTransport) doHandshake(
 			case <-lt.closed:
 			}
 		}
+		if lt.cfg.ListenErrFunc != nil {
+			lt.cfg.ListenErrFunc(ErrAndAddrPort{Err: err, AddrPort: addrPort})
+		}
 		return
 	}
 	if err := c.noise.RecvActThree(actThree); err != nil {
@@ -323,6 +347,9 @@ func (lt *LnTransport) doHandshake(
 			case lt.cfg.ListenErrChan <- ErrAndAddrPort{Err: err, AddrPort: addrPort}:
 			case <-lt.closed:
 			}
+		}
+		if lt.cfg.ListenErrFunc != nil {
+			lt.cfg.ListenErrFunc(ErrAndAddrPort{Err: err, AddrPort: addrPort})
 		}
 		return
 	}

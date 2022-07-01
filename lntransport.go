@@ -44,6 +44,9 @@ type Config struct {
 	//       Channel won't be closed by LnTransport when it is closed.
 	ListenErrChan chan<- ErrAndAddrPort
 
+	// ListenErrFunc works on errors like ListenErrChan, passes them to the given function, if non-nil.
+	ListenErrFunc func(ea ErrAndAddrPort)
+
 	// TODO: Whitelist, Blacklist
 }
 
