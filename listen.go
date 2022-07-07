@@ -141,7 +141,7 @@ func (lt *LnTransport) Listen(ctx context.Context, address string, options ...fu
 // connection from block other connection attempts.
 func (lt *LnTransport) doHandshake(
 	ctx context.Context,
-	conn *net.TCPConn,
+	netConn *net.TCPConn,
 	conns chan<- *Conn,
 	connsMutex *sync.RWMutex,
 	handshakeSema chan<- struct{},
@@ -152,22 +152,22 @@ func (lt *LnTransport) doHandshake(
 
 	select {
 	case <-ctx.Done():
-		conn.Close()
+		netConn.Close()
 		return
 	default:
 	}
 
-	remoteAddr := conn.RemoteAddr().(*net.TCPAddr).AddrPort()
+	remoteAddr := netConn.RemoteAddr().(*net.TCPAddr).AddrPort()
 
-	c := newConn()
-	c.parentClosed = lt.closed
-	c.contexts = lt.contexts
-	c.conn = conn
-	c.noise = newMachine(false, lt.privkey, nil)
+	conn := newConn()
+	conn.parentClosed = lt.closed
+	conn.contexts = lt.contexts
+	conn.conn = netConn
+	conn.noise = newMachine(false, lt.privkey, nil)
 	rollback := true
 	defer func() {
 		if rollback {
-			c.Close()
+			conn.Close()
 		}
 	}()
 
@@ -175,7 +175,7 @@ func (lt *LnTransport) doHandshake(
 	cinfo := contextInfo{
 		ctx: ctx,
 		contextInfoComparable: contextInfoComparable{
-			conn:    c.conn,
+			conn:    conn.conn,
 			isRead:  true,
 			isWrite: true,
 		},
@@ -193,7 +193,7 @@ func (lt *LnTransport) doHandshake(
 
 	// Reset the conn deadline.
 	// Can't count on the contextWatcher to have time to do that before this thread reaches the read.
-	c.conn.SetDeadline(time.Time{})
+	conn.conn.SetDeadline(time.Time{})
 	// If the context has already expired, and the contextWatcher handled the expiry before we reset the deadline om the line above,
 	// then the expiry action (setting instant deadline) would be ineffectual in contextWatcher,
 	// so we need to handle expiry at this point to be safe.
@@ -206,7 +206,7 @@ func (lt *LnTransport) doHandshake(
 	// We'll ensure that we get ActOne from the remote peer in a timely
 	// manner. If they don't respond within handshakeReadTimeout, then
 	// we'll kill the connection.
-	err := c.conn.SetReadDeadline(time.Now().Add(handshakeReadTimeout))
+	err := conn.conn.SetReadDeadline(time.Now().Add(handshakeReadTimeout))
 	if err != nil {
 		if !lt.cfg.ListenErrNoLog {
 			log.Println(err)
@@ -226,7 +226,7 @@ func (lt *LnTransport) doHandshake(
 	// connecting node doesn't know our long-term static public key, then
 	// this portion will fail with a non-nil error.
 	var actOne [actOneSize]byte
-	if _, err := io.ReadFull(c.conn, actOne[:]); err != nil {
+	if _, err := io.ReadFull(conn.conn, actOne[:]); err != nil {
 		err = maybeClosedExpiredErr(lt.closed, ctx.Err(), err)
 		if !lt.cfg.ListenErrNoLog {
 			log.Println(err)
@@ -242,7 +242,7 @@ func (lt *LnTransport) doHandshake(
 		}
 		return
 	}
-	if err := c.noise.RecvActOne(actOne); err != nil {
+	if err := conn.noise.RecvActOne(actOne); err != nil {
 		err = AuthError{err, remoteAddr}
 		if !lt.cfg.ListenErrNoLog {
 			log.Println(err)
@@ -260,7 +260,7 @@ func (lt *LnTransport) doHandshake(
 	}
 	// Next, progress the handshake processes by sending over our ephemeral
 	// key for the session along with an authenticating tag.
-	actTwo, err := c.noise.GenActTwo()
+	actTwo, err := conn.noise.GenActTwo()
 	if err != nil {
 		err = AuthError{err, remoteAddr}
 		if !lt.cfg.ListenErrNoLog {
@@ -277,7 +277,7 @@ func (lt *LnTransport) doHandshake(
 		}
 		return
 	}
-	if _, err := c.conn.Write(actTwo[:]); err != nil {
+	if _, err := conn.conn.Write(actTwo[:]); err != nil {
 		err = maybeClosedExpiredErr(lt.closed, ctx.Err(), err)
 		if !lt.cfg.ListenErrNoLog {
 			log.Println(err)
@@ -301,7 +301,7 @@ func (lt *LnTransport) doHandshake(
 	// We'll ensure that we get ActTwo from the remote peer in a timely
 	// manner. If they don't respond within handshakeReadTimeout, then
 	// we'll kill the connection.
-	err = c.conn.SetReadDeadline(time.Now().Add(handshakeReadTimeout))
+	err = conn.conn.SetReadDeadline(time.Now().Add(handshakeReadTimeout))
 	if err != nil {
 		if !lt.cfg.ListenErrNoLog {
 			log.Println(err)
@@ -321,7 +321,7 @@ func (lt *LnTransport) doHandshake(
 	// the connection peer's static public key. If this succeeds then both
 	// sides have mutually authenticated each other.
 	var actThree [actThreeSize]byte
-	if _, err := io.ReadFull(c.conn, actThree[:]); err != nil {
+	if _, err := io.ReadFull(conn.conn, actThree[:]); err != nil {
 		err = maybeClosedExpiredErr(lt.closed, ctx.Err(), err)
 		if !lt.cfg.ListenErrNoLog {
 			log.Println(err)
@@ -337,7 +337,7 @@ func (lt *LnTransport) doHandshake(
 		}
 		return
 	}
-	if err := c.noise.RecvActThree(actThree); err != nil {
+	if err := conn.noise.RecvActThree(actThree); err != nil {
 		err = AuthError{err, remoteAddr}
 		if !lt.cfg.ListenErrNoLog {
 			log.Println(err)
@@ -370,7 +370,7 @@ func (lt *LnTransport) doHandshake(
 	default:
 	}
 	rollback = false
-	conns <- c
+	conns <- conn
 	connsMutex.RUnlock()
 }
 

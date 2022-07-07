@@ -35,39 +35,39 @@ type Conn struct {
 }
 
 func newConn() *Conn {
-	c := &Conn{
+	conn := &Conn{
 		sendSemaphore:    make(chan struct{}, 1),
 		receiveSemaphore: make(chan struct{}, 1),
 		closed:           make(chan struct{}),
 		closedMutex:      new(sync.RWMutex),
 		readBuf:          new(bytes.Buffer),
 	}
-	c.sendSemaphore <- struct{}{}
-	c.receiveSemaphore <- struct{}{}
-	return c
+	conn.sendSemaphore <- struct{}{}
+	conn.receiveSemaphore <- struct{}{}
+	return conn
 }
 
 // Close closes the underlying network connection. Idempotent.
 //
 // Any ongoing, or future, Send or Receive calls will be unblocked and return a non-nil error.
-func (c *Conn) Close() error {
-	_, err := c.close(false, false)
+func (conn *Conn) Close() error {
+	_, err := conn.close(false, false)
 	return err
 }
 
 // close does the close in a cuncurrency safe way.
 // On return the closed-channel is closed and all semaphores held.
-func (c *Conn) close(sendSemaphoreHeld, receiveSemaphoreHeld bool) (bool, error) {
-	c.closedMutex.Lock()
+func (conn *Conn) close(sendSemaphoreHeld, receiveSemaphoreHeld bool) (bool, error) {
+	conn.closedMutex.Lock()
 	select {
-	case <-c.closed:
-		c.closedMutex.Unlock()
+	case <-conn.closed:
+		conn.closedMutex.Unlock()
 		return false, nil
 	default:
 	}
-	close(c.closed)
-	c.closedMutex.Unlock()
-	err := c.conn.Close()
+	close(conn.closed)
+	conn.closedMutex.Unlock()
+	err := conn.conn.Close()
 
 	// After closing the conn, do some cleanup.
 	// This way ongoing send/receive won't block the sendSemaphore/receiveSemaphore.
@@ -75,34 +75,34 @@ func (c *Conn) close(sendSemaphoreHeld, receiveSemaphoreHeld bool) (bool, error)
 	cinfo := contextInfo{
 		remove: true,
 		contextInfoComparable: contextInfoComparable{
-			conn:    c.conn,
+			conn:    conn.conn,
 			isWrite: true,
 		},
 	}
 	if !sendSemaphoreHeld {
-		<-c.sendSemaphore
+		<-conn.sendSemaphore
 	}
 	select {
-	case c.contexts <- cinfo:
-	case <-c.parentClosed:
+	case conn.contexts <- cinfo:
+	case <-conn.parentClosed:
 	}
 	cinfo.isWrite = false
 	cinfo.isRead = true
 	if !receiveSemaphoreHeld {
-		<-c.receiveSemaphore
+		<-conn.receiveSemaphore
 	}
 	select {
-	case c.contexts <- cinfo:
-	case <-c.parentClosed:
+	case conn.contexts <- cinfo:
+	case <-conn.parentClosed:
 	}
 
 	return true, err
 }
 
 // IsClosed reports if the connection has been closed, either by a call to Close or due to becoming defunct after a failed Send/Receive.
-func (c *Conn) IsClosed() bool {
+func (conn *Conn) IsClosed() bool {
 	select {
-	case <-c.closed:
+	case <-conn.closed:
 		return true
 	default:
 		return false
@@ -120,22 +120,22 @@ func (c *Conn) IsClosed() bool {
 //
 // If the connection was not closed then inspect the error to see if it is recoverable by doing another send on the same connection.
 // Known unrecoverable errors: ErrMaxMessageLengthExceeded
-func (c *Conn) Send(ctx context.Context, msg []byte) error {
+func (conn *Conn) Send(ctx context.Context, msg []byte) error {
 	// Wait for the semaphore or one of the exit conditions.
 	weClose := false
 	select {
-	case <-c.sendSemaphore:
+	case <-conn.sendSemaphore:
 		defer func() {
 			if !weClose {
-				c.sendSemaphore <- struct{}{}
+				conn.sendSemaphore <- struct{}{}
 			}
 		}()
-	case <-c.parentClosed:
-		c.close(false, false)
+	case <-conn.parentClosed:
+		conn.close(false, false)
 		return ErrLnTransportClosed
-	case <-c.closed:
+	case <-conn.closed:
 		select {
-		case <-c.parentClosed:
+		case <-conn.parentClosed:
 			// Takes precedence, explains more.
 			return ErrLnTransportClosed
 		default:
@@ -145,14 +145,14 @@ func (c *Conn) Send(ctx context.Context, msg []byte) error {
 		return ctx.Err()
 	}
 
-	if err := c.noise.encryptMessage(msg); err != nil {
-		weClose, _ = c.close(true, false)
+	if err := conn.noise.encryptMessage(msg); err != nil {
+		weClose, _ = conn.close(true, false)
 		return err
 	}
 	rollback := true
 	defer func() {
 		if rollback {
-			c.noise.rollbackEncryptMessage()
+			conn.noise.rollbackEncryptMessage()
 		}
 	}()
 
@@ -160,13 +160,13 @@ func (c *Conn) Send(ctx context.Context, msg []byte) error {
 	cinfo := contextInfo{
 		ctx: ctx,
 		contextInfoComparable: contextInfoComparable{
-			conn:    c.conn,
+			conn:    conn.conn,
 			isWrite: true,
 		},
 	}
 	select {
-	case c.contexts <- cinfo:
-	case <-c.parentClosed:
+	case conn.contexts <- cinfo:
+	case <-conn.parentClosed:
 		return ErrLnTransportClosed
 	case <-ctx.Done():
 		return ctx.Err()
@@ -174,7 +174,7 @@ func (c *Conn) Send(ctx context.Context, msg []byte) error {
 
 	// Reset the conn deadline.
 	// Can't count on the contextWatcher to have time to do that before this thread reaches the write.
-	c.conn.SetWriteDeadline(time.Time{})
+	conn.conn.SetWriteDeadline(time.Time{})
 	// If the context has already expired, and the contextWatcher handled the expiry before we reset the deadline on the line above,
 	// then the expiry action (setting instant deadline) would be ineffectual in contextWatcher,
 	// so we need to handle expiry at this point to be safe.
@@ -184,20 +184,20 @@ func (c *Conn) Send(ctx context.Context, msg []byte) error {
 	default:
 	}
 
-	n, err := c.conn.Write(c.noise.encryptedMessage)
+	n, err := conn.conn.Write(conn.noise.encryptedMessage)
 	if err != nil {
 		//log.Printf("[%T] %[1]v, n=%v", err, n)
 		if netError, ok := err.(net.Error); ok && !netError.Timeout() {
 			// Assume that a non-timeout error is unrecoverable.
-			weClose, _ = c.close(true, false)
+			weClose, _ = conn.close(true, false)
 		} else if n > 0 {
 			// Partial write breaks the protocol, must become defunct.
-			weClose, _ = c.close(true, false)
+			weClose, _ = conn.close(true, false)
 		}
 		select {
-		case <-c.parentClosed:
+		case <-conn.parentClosed:
 			// LnTransport closed, which caused the context to be treated as cancelled, interrupting the write.
-			weClose, _ = c.close(true, false)
+			weClose, _ = conn.close(true, false)
 			return ErrLnTransportClosed
 		case <-ctx.Done():
 			// Context expired, which will provoke a Deadline exceeded error, but don't show that to the caller.
@@ -219,22 +219,22 @@ func (c *Conn) Send(ctx context.Context, msg []byte) error {
 // A non-nil error means that a message was not fully received (and a partial message won't be returned).
 // Then the connection might have been closed.
 // Check for it with IsClosed, comparing the returned error to ErrConnClosed is not enough.
-func (c *Conn) Receive(ctx context.Context) ([]byte, error) {
+func (conn *Conn) Receive(ctx context.Context) ([]byte, error) {
 	// Wait for the semaphore or one of the exit conditions.
 	weClose := false
 	select {
-	case <-c.receiveSemaphore:
+	case <-conn.receiveSemaphore:
 		defer func() {
 			if !weClose {
-				c.receiveSemaphore <- struct{}{}
+				conn.receiveSemaphore <- struct{}{}
 			}
 		}()
-	case <-c.parentClosed:
-		c.close(false, false)
+	case <-conn.parentClosed:
+		conn.close(false, false)
 		return nil, ErrLnTransportClosed
-	case <-c.closed:
+	case <-conn.closed:
 		select {
-		case <-c.parentClosed:
+		case <-conn.parentClosed:
 			// Takes precedence, explains more.
 			return nil, ErrLnTransportClosed
 		default:
@@ -248,13 +248,13 @@ func (c *Conn) Receive(ctx context.Context) ([]byte, error) {
 	cinfo := contextInfo{
 		ctx: ctx,
 		contextInfoComparable: contextInfoComparable{
-			conn:   c.conn,
+			conn:   conn.conn,
 			isRead: true,
 		},
 	}
 	select {
-	case c.contexts <- cinfo:
-	case <-c.parentClosed:
+	case conn.contexts <- cinfo:
+	case <-conn.parentClosed:
 		return nil, ErrLnTransportClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -262,7 +262,7 @@ func (c *Conn) Receive(ctx context.Context) ([]byte, error) {
 
 	// Reset the conn deadline.
 	// Can't count on the contextWatcher to have time to do that before this thread reaches the read.
-	c.conn.SetReadDeadline(time.Time{})
+	conn.conn.SetReadDeadline(time.Time{})
 	// If the context has already expired, and the contextWatcher handled the expiry before we reset the deadline on the line above,
 	// then the expiry action (setting instant deadline) would be ineffectual in contextWatcher,
 	// so we need to handle expiry at this point to be safe.
@@ -273,19 +273,19 @@ func (c *Conn) Receive(ctx context.Context) ([]byte, error) {
 	}
 
 	// Read the header.
-	n, err := io.ReadFull(c.conn, c.encHeader[:])
+	n, err := io.ReadFull(conn.conn, conn.encHeader[:])
 	if err != nil {
 		if netError, ok := err.(net.Error); ok && !netError.Timeout() {
 			// Assume that a non-timeout error is unrecoverable.
-			weClose, _ = c.close(false, true)
+			weClose, _ = conn.close(false, true)
 		} else if n > 0 {
 			// Partial write breaks the protocol, must become defunct.
-			weClose, _ = c.close(false, true)
+			weClose, _ = conn.close(false, true)
 		}
 		select {
-		case <-c.parentClosed:
+		case <-conn.parentClosed:
 			// LnTransport closed, which caused the context to be treated as cancelled, interrupting the read.
-			weClose, _ = c.close(false, true)
+			weClose, _ = conn.close(false, true)
 			return nil, ErrLnTransportClosed
 		case <-ctx.Done():
 			// Context expired, which will provoke a Deadline exceeded error, but don't show that to the caller.
@@ -295,21 +295,21 @@ func (c *Conn) Receive(ctx context.Context) ([]byte, error) {
 		}
 	}
 	// Decrypt the header.
-	pktLen, err := c.noise.decryptHeader(c.encHeader[:])
+	pktLen, err := conn.noise.decryptHeader(conn.encHeader[:])
 	if err != nil {
-		weClose, _ = c.close(false, true)
+		weClose, _ = conn.close(false, true)
 		return nil, err
 	}
 
 	// Read the body.
-	c.readBuf.Reset()
-	_, err = io.CopyN(c.readBuf, c.conn, int64(pktLen))
+	conn.readBuf.Reset()
+	_, err = io.CopyN(conn.readBuf, conn.conn, int64(pktLen))
 	if err != nil {
 		// The header has been read, then not fully reading the body will break the protocol,
 		// so the conn must be closed.
-		weClose, _ = c.close(false, true)
+		weClose, _ = conn.close(false, true)
 		select {
-		case <-c.parentClosed:
+		case <-conn.parentClosed:
 			return nil, ErrLnTransportClosed
 		case <-ctx.Done():
 			// Context expired, which will provoke a Deadline exceeded error, but don't show that to the caller.
@@ -319,35 +319,35 @@ func (c *Conn) Receive(ctx context.Context) ([]byte, error) {
 		}
 	}
 	// Decrypt the body.
-	b := c.readBuf.Bytes()
-	msg, err := c.noise.decryptBody(b)
+	b := conn.readBuf.Bytes()
+	msg, err := conn.noise.decryptBody(b)
 	if err != nil {
-		weClose, _ = c.close(false, true)
+		weClose, _ = conn.close(false, true)
 		return nil, err
 	}
 	return msg, nil
 }
 
 // LocalAddrPort returns the local network address.
-func (c *Conn) LocalAddrPort() netip.AddrPort {
-	return c.conn.LocalAddr().(*net.TCPAddr).AddrPort()
+func (conn *Conn) LocalAddrPort() netip.AddrPort {
+	return conn.conn.LocalAddr().(*net.TCPAddr).AddrPort()
 }
 
 // RemoteAddrPort returns the remote network address.
-func (c *Conn) RemoteAddrPort() netip.AddrPort {
-	return c.conn.RemoteAddr().(*net.TCPAddr).AddrPort()
+func (conn *Conn) RemoteAddrPort() netip.AddrPort {
+	return conn.conn.RemoteAddr().(*net.TCPAddr).AddrPort()
 }
 
 // RemotePubkey returns the remote peer's static public key.
-func (c *Conn) RemotePubkey() [33]byte {
+func (conn *Conn) RemotePubkey() [33]byte {
 	var b [33]byte
-	copy(b[:], c.noise.remoteStatic.SerializeCompressed())
+	copy(b[:], conn.noise.remoteStatic.SerializeCompressed())
 	return b
 }
 
 // LocalPubkey returns the own static public key.
-func (c *Conn) LocalPubkey() [33]byte {
+func (conn *Conn) LocalPubkey() [33]byte {
 	var b [33]byte
-	copy(b[:], c.noise.localStatic.PubKey().SerializeCompressed())
+	copy(b[:], conn.noise.localStatic.PubKey().SerializeCompressed())
 	return b
 }

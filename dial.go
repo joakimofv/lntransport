@@ -43,15 +43,15 @@ func (lt *LnTransport) Dial(ctx context.Context, address string, remotePubkey []
 		return nil, err
 	}
 
-	c := newConn()
-	c.parentClosed = lt.closed
-	c.contexts = lt.contexts
-	c.conn = netConn.(*net.TCPConn)
-	c.noise = newMachine(true, lt.privkey, remotePub)
+	conn := newConn()
+	conn.parentClosed = lt.closed
+	conn.contexts = lt.contexts
+	conn.conn = netConn.(*net.TCPConn)
+	conn.noise = newMachine(true, lt.privkey, remotePub)
 	rollback := true
 	defer func() {
 		if rollback {
-			c.Close()
+			conn.Close()
 		}
 	}()
 
@@ -59,7 +59,7 @@ func (lt *LnTransport) Dial(ctx context.Context, address string, remotePubkey []
 	cinfo := contextInfo{
 		ctx: ctx,
 		contextInfoComparable: contextInfoComparable{
-			conn:    c.conn,
+			conn:    conn.conn,
 			isRead:  true,
 			isWrite: true,
 		},
@@ -77,7 +77,7 @@ func (lt *LnTransport) Dial(ctx context.Context, address string, remotePubkey []
 
 	// Reset the conn deadline.
 	// Can't count on the contextWatcher to have time to do that before this thread reaches the write.
-	c.conn.SetDeadline(time.Time{})
+	conn.conn.SetDeadline(time.Time{})
 	// If the context has already expired, and the contextWatcher handled the expiry before we reset the deadline om the line above,
 	// then the expiry action (setting instant deadline) would be ineffectual in contextWatcher,
 	// so we need to handle expiry at this point to be safe.
@@ -92,17 +92,17 @@ func (lt *LnTransport) Dial(ctx context.Context, address string, remotePubkey []
 	// Copyright (C) 2015-2022 Lightning Labs and The Lightning Network Developers
 
 	// Initiate the handshake by sending the first act to the receiver.
-	actOne, err := c.noise.GenActOne()
+	actOne, err := conn.noise.GenActOne()
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.conn.Write(actOne[:]); err != nil {
+	if _, err := conn.conn.Write(actOne[:]); err != nil {
 		return nil, maybeClosedExpiredErr(lt.closed, ctx.Err(), err)
 	}
 	// We'll ensure that we get ActTwo from the remote peer in a timely
 	// manner. If they don't respond within handshakeReadTimeout, then
 	// we'll kill the connection.
-	err = c.conn.SetReadDeadline(time.Now().Add(handshakeReadTimeout))
+	err = conn.conn.SetReadDeadline(time.Now().Add(handshakeReadTimeout))
 	if err != nil {
 		return nil, err
 	}
@@ -111,19 +111,19 @@ func (lt *LnTransport) Dial(ctx context.Context, address string, remotePubkey []
 	// send our static public key to the remote peer with strong forward
 	// secrecy.
 	var actTwo [actTwoSize]byte
-	if _, err := io.ReadFull(c.conn, actTwo[:]); err != nil {
+	if _, err := io.ReadFull(conn.conn, actTwo[:]); err != nil {
 		return nil, maybeClosedExpiredErr(lt.closed, ctx.Err(), err)
 	}
-	if err := c.noise.RecvActTwo(actTwo); err != nil {
+	if err := conn.noise.RecvActTwo(actTwo); err != nil {
 		return nil, err
 	}
 	// Finally, complete the handshake by sending over our encrypted static
 	// key and execute the final ECDH operation.
-	actThree, err := c.noise.GenActThree()
+	actThree, err := conn.noise.GenActThree()
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.conn.Write(actThree[:]); err != nil {
+	if _, err := conn.conn.Write(actThree[:]); err != nil {
 		return nil, maybeClosedExpiredErr(lt.closed, ctx.Err(), err)
 	}
 
@@ -141,7 +141,7 @@ func (lt *LnTransport) Dial(ctx context.Context, address string, remotePubkey []
 	default:
 	}
 	rollback = false
-	return c, nil
+	return conn, nil
 }
 
 func maybeClosedExpiredErr(closed <-chan struct{}, ctxErr, err error) error {

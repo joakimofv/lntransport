@@ -66,13 +66,13 @@ func TestWithLnd(t *testing.T) {
 		}
 		defer lndConn.Close()
 
-		var c *lntransport.Conn
+		var conn *lntransport.Conn
 		select {
-		case c = <-ch:
+		case conn = <-ch:
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for connection")
 		}
-		defer c.Close()
+		defer conn.Close()
 
 		// Send a message.
 		if _, err := lndConn.Write(msg); err != nil {
@@ -80,7 +80,7 @@ func TestWithLnd(t *testing.T) {
 		}
 		ctx, cancel = context.WithTimeout(ctx, time.Second)
 		defer cancel()
-		if msg2, err := c.Receive(ctx); err != nil {
+		if msg2, err := conn.Receive(ctx); err != nil {
 			t.Error(err)
 		} else if !bytes.Equal(msg, msg2) {
 			t.Error("message contents changed")
@@ -98,11 +98,11 @@ func TestWithLnd(t *testing.T) {
 		// Dial from us.
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		c, err := lt.Dial(ctx, lndListener.Addr().String(), lndPrivkey.PubKey().SerializeCompressed())
+		conn, err := lt.Dial(ctx, lndListener.Addr().String(), lndPrivkey.PubKey().SerializeCompressed())
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer c.Close()
+		defer conn.Close()
 
 		go func() {
 			<-time.After(time.Second)
@@ -114,7 +114,7 @@ func TestWithLnd(t *testing.T) {
 		}
 
 		// Send a message.
-		if err = c.Send(ctx, msg); err != nil {
+		if err = conn.Send(ctx, msg); err != nil {
 			t.Fatal(err)
 		}
 		if err := lndConn.SetDeadline(time.Now().Add(time.Second)); err != nil {
@@ -167,18 +167,18 @@ func FuzzWithLndSend(f *testing.F) {
 		f.Fatal(err)
 	}
 	defer lndConn.Close()
-	var c *lntransport.Conn
+	var conn *lntransport.Conn
 	select {
-	case c = <-ch:
+	case conn = <-ch:
 	case <-time.After(time.Second):
 		f.Fatal("timed out waiting for connection")
 	}
-	defer c.Close()
+	defer conn.Close()
 
 	f.Fuzz(func(t *testing.T, msg []byte) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		if err = c.Send(ctx, msg); err != nil {
+		if err = conn.Send(ctx, msg); err != nil {
 			if err == lntransport.ErrMaxMessageLengthExceeded && len(msg) > math.MaxUint16 {
 				return
 			}
@@ -238,13 +238,13 @@ func FuzzWithLndReceive(f *testing.F) {
 		f.Fatal(err)
 	}
 	defer lndConn.Close()
-	var c *lntransport.Conn
+	var conn *lntransport.Conn
 	select {
-	case c = <-ch:
+	case conn = <-ch:
 	case <-time.After(time.Second):
 		f.Fatal("timed out waiting for connection")
 	}
-	defer c.Close()
+	defer conn.Close()
 
 	f.Fuzz(func(t *testing.T, msg []byte) {
 		if _, err := lndConn.Write(msg); err != nil {
@@ -255,7 +255,7 @@ func FuzzWithLndReceive(f *testing.F) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		if msg2, err := c.Receive(ctx); err != nil {
+		if msg2, err := conn.Receive(ctx); err != nil {
 			t.Error(err)
 		} else if !bytes.Equal(msg, msg2) {
 			t.Error("message contents changed")

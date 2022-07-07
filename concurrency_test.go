@@ -64,20 +64,20 @@ func TestConcurrency(t *testing.T) {
 
 			i := i
 			go func() {
-				for c := range ch {
+				for conn := range ch {
 					for j := 0; j < NrOfNodes; j++ {
-						if pubs[j] == c.RemotePubkey() {
+						if pubs[j] == conn.RemotePubkey() {
 							connsMutex.Lock()
-							conns[i][j] = append(conns[i][j], c)
+							conns[i][j] = append(conns[i][j], conn)
 							connsMutex.Unlock()
 							// Set up receiving in two concurrent goroutines.
 							for m := 0; m < 2; m++ {
 								i := i
 								j := j
-								c := c
+								conn := conn
 								go func() {
 									for {
-										_, err := c.Receive(context.Background())
+										_, err := conn.Receive(context.Background())
 										if err != nil {
 											return
 										}
@@ -106,22 +106,22 @@ func TestConcurrency(t *testing.T) {
 				wgDials.Add(1)
 				go func() {
 					defer wgDials.Done()
-					c, err := lt.Dial(context.Background(), addrs[j][k].String(), pubs[j][:])
+					conn, err := lt.Dial(context.Background(), addrs[j][k].String(), pubs[j][:])
 					if err != nil {
 						t.Error(err)
 						return
 					}
 					connsMutex.Lock()
-					conns[i][j] = append(conns[i][j], c)
+					conns[i][j] = append(conns[i][j], conn)
 					connsMutex.Unlock()
 					// Set up receiving in two concurrent goroutines.
 					for m := 0; m < 2; m++ {
 						i := i
 						j := j
-						c := c
+						conn := conn
 						go func() {
 							for {
-								_, err := c.Receive(context.Background())
+								_, err := conn.Receive(context.Background())
 								if err != nil {
 									return
 								}
@@ -145,7 +145,7 @@ func TestConcurrency(t *testing.T) {
 	wgSends := new(sync.WaitGroup)
 	for i := 0; i < NrOfNodes; i++ {
 		for j := 0; j < NrOfNodes; j++ {
-			for _, c := range conns[i][j] {
+			for _, conn := range conns[i][j] {
 				// Send some.
 				for n := 0; n < rng.Intn(4); n++ {
 					i := i
@@ -153,7 +153,7 @@ func TestConcurrency(t *testing.T) {
 					wgSends.Add(1)
 					go func() {
 						defer wgSends.Done()
-						err := c.Send(context.Background(), msg)
+						err := conn.Send(context.Background(), msg)
 						if err != nil {
 							t.Error(err)
 							return
@@ -207,8 +207,8 @@ func TestConcurrency(t *testing.T) {
 
 	for _, css := range conns {
 		for _, cs := range css {
-			for _, c := range cs {
-				c.Close()
+			for _, conn := range cs {
+				conn.Close()
 			}
 		}
 	}

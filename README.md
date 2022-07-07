@@ -43,9 +43,9 @@ Incoming connections will be passed on the `ch` channel.
 The channel will be closed when the listener is done so you can drain it like this:
 
 ```go
-var c *Conn
-for c = range ch {
-	defer c.Close()
+var conn *Conn
+for conn = range ch {
+	defer conn.Close()
 	// ...
 }
 ```
@@ -53,11 +53,11 @@ for c = range ch {
 ### [Dial](https://pkg.go.dev/github.com/joakimofv/lntransport#LnTransport.Dial)
 
 ```go
-c, err := lt.Dial(ctx, "1.2.3.4:12345", remotePubkey)
+conn, err := lt.Dial(ctx, "1.2.3.4:12345", remotePubkey)
 if err != nil {
 	// Handle err.
 }
-defer c.Close()
+defer conn.Close()
 ```
 
 The `remotePubkey` refers to the pubkey of the remote side, a byte slice, which you have to learn somehow before dialing.
@@ -66,10 +66,10 @@ For your own side you can get it with `lt.Pubkey()`.
 ### [Send](https://pkg.go.dev/github.com/joakimofv/lntransport#Conn.Send)
 
 ```go
-err := c.Send(ctx, []byte("abcd..."))
+err := conn.Send(ctx, []byte("abcd..."))
 if err != nil {
-	if c.IsClosed() {
-		// c has become defunct.
+	if conn.IsClosed() {
+		// conn has become defunct.
 	}
 	// Handle err.
 }
@@ -78,10 +78,10 @@ if err != nil {
 ### [Receive](https://pkg.go.dev/github.com/joakimofv/lntransport#Conn.Receive)
 
 ```go
-msg, err := c.Receive(ctx)
+msg, err := conn.Receive(ctx)
 if err != nil {
-	if c.IsClosed() {
-		// c has become defunct.
+	if conn.IsClosed() {
+		// conn has become defunct.
 	}
 	// Handle err.
 }
@@ -92,7 +92,7 @@ if err != nil {
 ## Defunct Connection
 
 Various network problems, counterparty problems, or bungled sends/receives may cause a connection object to become defunct.
-Then it will close itself. Check if it has happened with [`c.IsClosed()`](https://pkg.go.dev/github.com/joakimofv/lntransport#Conn.IsClosed).
+Then it will close itself. Check if it has happened with [`conn.IsClosed()`](https://pkg.go.dev/github.com/joakimofv/lntransport#Conn.IsClosed).
 
 A closed connection can not be recovered. Be ready to dial again to make a new connection, or handle the situation in some other way.
 

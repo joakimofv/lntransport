@@ -1,4 +1,4 @@
-// Package lntransport provides a client for encrypted tcp communication on Bitcoin Lightning Network.
+// Package lntransport provides a connection object for encrypted tcp communication on Bitcoin Lightning Network.
 package lntransport
 
 import (

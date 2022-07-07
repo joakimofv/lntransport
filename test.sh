@@ -2,5 +2,5 @@
 
 go test -fuzz . -fuzztime 5s
 cd interop-test
-./test
+./test.sh
 cd -
