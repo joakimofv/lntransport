@@ -96,6 +96,31 @@ func TestListen(t *testing.T) {
 	}
 }
 
+func TestBadListen(t *testing.T) {
+	// Make sure we clean.
+	fdsBefore := fileDescriptorCount(t)
+	defer t.Run("fdcount", func(t *testing.T) {
+		fdsAfter := fileDescriptorCount(t)
+		if fdsBefore != fdsAfter {
+			t.Errorf("file descriptors count expected %v, got %v", fdsBefore, fdsAfter)
+		}
+	})
+
+	privkey, _ := btcec.NewPrivateKey()
+	lt, _ := New(Config{Privkey: privkeyFixedSize(privkey.Serialize())})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, _, err := lt.Listen(ctx, "ysdfuhreiu")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	if err := lt.Close(); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestDial(t *testing.T) {
 	// Make sure we clean.
 	fdsBefore := fileDescriptorCount(t)

@@ -40,6 +40,7 @@ func (lt *LnTransport) Listen(ctx context.Context, address string, options ...fu
 	l, err := lcfg.Listen(ctx, "tcp", address)
 	if err != nil {
 		lt.wg.Done()
+		lt.wg.Done()
 		return nil, netip.AddrPort{}, err
 	}
 	addrPort := l.Addr().(*net.TCPAddr).AddrPort()
