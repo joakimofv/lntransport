@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"sync"
 	"time"
+
+	"golang.org/x/xerrors"
 )
 
 // Conn is a network connection with transport encrypted according to the protocol.
@@ -114,7 +116,7 @@ func (conn *Conn) IsClosed() bool {
 //
 // A non-nil error guarantees that the message was not fully sent.
 // Then, in case there was a partial send, the connection may become defunct and is closed.
-// Check for it with IsClosed, comparing the returned error to ErrConnClosed is not enough.
+// Check for it with IsClosed. Comparing the returned error to ErrConnClosed is not enough.
 //
 // You must then dial up a new connection and send the message on that, if you want to proceed with the send.
 //
@@ -203,22 +205,24 @@ func (conn *Conn) Send(ctx context.Context, msg []byte) error {
 			// Context expired, which will provoke a Deadline exceeded error, but don't show that to the caller.
 			return ctx.Err()
 		default:
-			return err
+			return xerrors.Errorf("Failed to write to the wire: %w", err)
 		}
 	}
 	rollback = false
 	return nil
 }
 
-// Receive reads the next message on the connection and returns it
-// as a slice of bytes. Blocks until a message arrives, the Conn or LnTransport is closed, or the context expires.
+// Receive reads the next message on the connection and returns it as a slice of bytes.
+// Blocks until a message arrives, the Conn or LnTransport is closed, or the context expires.
 //
 // The returned byte slice is not safe for use after Receive is called again,
 // the underlying storage will be reused on the next read.
 //
 // A non-nil error means that a message was not fully received (and a partial message won't be returned).
 // Then the connection might have been closed.
-// Check for it with IsClosed, comparing the returned error to ErrConnClosed is not enough.
+// Check for it with IsClosed. Comparing the returned error to ErrConnClosed is not enough.
+//
+// If the remote side closed the connection during the receive then the returned error will contain io.EOF (check with errors.Is).
 func (conn *Conn) Receive(ctx context.Context) ([]byte, error) {
 	// Wait for the semaphore or one of the exit conditions.
 	weClose := false
@@ -278,6 +282,9 @@ func (conn *Conn) Receive(ctx context.Context) ([]byte, error) {
 		if netError, ok := err.(net.Error); ok && !netError.Timeout() {
 			// Assume that a non-timeout error is unrecoverable.
 			weClose, _ = conn.close(false, true)
+		} else if err == io.EOF {
+			// The other side closed the connection.
+			weClose, _ = conn.close(false, true)
 		} else if n > 0 {
 			// Partial write breaks the protocol, must become defunct.
 			weClose, _ = conn.close(false, true)
@@ -291,7 +298,7 @@ func (conn *Conn) Receive(ctx context.Context) ([]byte, error) {
 			// Context expired, which will provoke a Deadline exceeded error, but don't show that to the caller.
 			return nil, ctx.Err()
 		default:
-			return nil, err
+			return nil, xerrors.Errorf("Failed to read message header: %w", err)
 		}
 	}
 	// Decrypt the header.
@@ -315,7 +322,7 @@ func (conn *Conn) Receive(ctx context.Context) ([]byte, error) {
 			// Context expired, which will provoke a Deadline exceeded error, but don't show that to the caller.
 			return nil, ctx.Err()
 		default:
-			return nil, err
+			return nil, xerrors.Errorf("Failed to read message body: %w", err)
 		}
 	}
 	// Decrypt the body.
